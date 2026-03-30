@@ -1345,6 +1345,7 @@ function updateCountBadge() {
 // FETCH URLs
 // ─────────────────────────────────────────────
 async function startFetch() {
+alert('startFetch called, apiMode=' + apiMode);
   if (selectedCities.size === 0) return;
 
   const btn = document.getElementById('fetchBtn');
