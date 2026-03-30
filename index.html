@@ -1345,7 +1345,6 @@ function updateCountBadge() {
 // FETCH URLs
 // ─────────────────────────────────────────────
 async function startFetch() {
-alert('startFetch called, apiMode=' + apiMode);
   if (selectedCities.size === 0) return;
 
   const btn = document.getElementById('fetchBtn');
@@ -1354,7 +1353,6 @@ alert('startFetch called, apiMode=' + apiMode);
   document.getElementById('fetchBtnText').textContent = '取得中…';
 
   document.getElementById('progressPanel').style.display = 'block';
-  document.getElementById('progressPanel').querySelector('.progress-wrap').style.display = 'block';
   document.getElementById('urlTableWrap').style.display = 'none';
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('logArea').innerHTML = '';
