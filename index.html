@@ -402,8 +402,8 @@
       </div>
 
       <button class="btn-primary" id="fetchBtn" onclick="startFetch()" disabled>
-        <span id="fetchBtnIcon">🔍</span>
-        <span id="fetchBtnText">ダウンロードURLを取得</span>
+        <span id="fetchBtnIcon">⬇️</span>
+        <span id="fetchBtnText">ダウンロード</span>
       </button>
 
     </div>
@@ -416,8 +416,8 @@
     <div class="panel progress-wrap" id="progressPanel">
       <div class="panel-body">
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-          <div class="spinner"></div>
-          <span style="font-size:13px;">APIからURL取得中…</span>
+          <div class="spinner" id="fetchSpinner"></div>
+          <span id="fetchStatusText" style="font-size:13px;">APIからURL取得中…</span>
         </div>
         <div class="progress-bar-bg"><div class="progress-bar" id="progressBar"></div></div>
         <div class="progress-label" id="progressLabel">0 / 0</div>
@@ -427,52 +427,21 @@
 
     <!-- result -->
     <div class="panel" id="resultPanel">
-      <div class="tab-bar">
-        <button class="tab active" onclick="switchTab('urls')" id="tab-urls">URL一覧</button>
-        <button class="tab" onclick="switchTab('curl')" id="tab-curl">curl / wget</button>
-        <button class="tab" onclick="switchTab('ps')" id="tab-ps">PowerShell</button>
+      <div class="panel-header">
+        <h2>📋 ダウンロード結果</h2>
       </div>
-
-      <div class="tab-content active" id="tabContent-urls">
+      <div style="padding:14px 16px;">
         <div class="empty-state" id="emptyState">
           <div class="icon">📂</div>
-          <p>市町村を選択して「URLを取得」を実行してください</p>
+          <p>市町村を選択して「ダウンロード」を実行してください</p>
         </div>
         <div id="urlTableWrap" style="display:none;">
           <div class="url-table-wrap">
             <table>
-              <thead><tr><th>市区町村</th><th>GeoJSON URL</th><th>状態</th></tr></thead>
+              <thead><tr><th>市区町村</th><th>ファイル名</th><th>状態</th></tr></thead>
               <tbody id="urlTableBody"></tbody>
             </table>
           </div>
-          <div class="result-actions" id="resultActions">
-            <button class="btn-action primary-action" onclick="downloadUrlList()">📄 url_list.txt をDL</button>
-            <button class="btn-action" onclick="copyAllUrls()">📋 URLをコピー</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="tab-content" id="tabContent-curl">
-        <div class="empty-state" id="curlEmpty">
-          <div class="icon">💻</div>
-          <p>URLを取得すると curl / wget コマンドが生成されます</p>
-        </div>
-        <div id="curlBlock" style="display:none">
-          <p style="font-size:11px; color:var(--muted); margin-bottom:8px;">url_list.txt を使った一括ダウンロード</p>
-          <div class="code-block" id="curlCode"></div>
-          <button class="btn-action" style="margin-top:10px; width:100%" onclick="copyCurl()">📋 コマンドをコピー</button>
-        </div>
-      </div>
-
-      <div class="tab-content" id="tabContent-ps">
-        <div class="empty-state" id="psEmpty">
-          <div class="icon">🪟</div>
-          <p>URLを取得するとPowerShellスクリプトが生成されます</p>
-        </div>
-        <div id="psBlock" style="display:none">
-          <p style="font-size:11px; color:var(--muted); margin-bottom:8px;">PowerShell — url_list.txtを使わずに直接ダウンロード</p>
-          <div class="code-block" id="psCode"></div>
-          <button class="btn-action" style="margin-top:10px; width:100%" onclick="copyPs()">📋 スクリプトをコピー</button>
         </div>
       </div>
     </div>
@@ -1229,7 +1198,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 function buildPrefSelect() {
   const sel = document.getElementById('prefSelect');
-  Object.entries(MASTER).forEach(([code, data]) => {
+  Object.entries(MASTER).sort(([a],[b]) => a.localeCompare(b)).forEach(([code, data]) => {
     const opt = document.createElement('option');
     opt.value = code;
     opt.textContent = `${data.name}`;
@@ -1342,17 +1311,20 @@ function updateCountBadge() {
 }
 
 // ─────────────────────────────────────────────
-// FETCH URLs
+// STEP 1+2+3: URL取得 → 確認 → GeoJSONダウンロード
 // ─────────────────────────────────────────────
 async function startFetch() {
   if (selectedCities.size === 0) return;
 
   const btn = document.getElementById('fetchBtn');
   btn.disabled = true;
-  document.getElementById('fetchBtnIcon').textContent = '';
-  document.getElementById('fetchBtnText').textContent = '取得中…';
+  document.getElementById('fetchBtnIcon').textContent = '⏳';
+  document.getElementById('fetchBtnText').textContent = 'URL取得中…';
 
+  // 進捗パネルをリセット
   document.getElementById('progressPanel').style.display = 'block';
+  document.getElementById('fetchSpinner').style.display = '';
+  document.getElementById('fetchStatusText').textContent = 'APIからURL取得中…';
   document.getElementById('urlTableWrap').style.display = 'none';
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('logArea').innerHTML = '';
@@ -1361,24 +1333,17 @@ async function startFetch() {
   const cities = Array.from(selectedCities.entries());
   const total = cities.length;
 
-  if (apiMode === 'fallback') {
-    // fallbackモード：fetchなしで即座にURLリスト生成
-    addLog('warn', '⚠ オフラインモード: データセットページURLを生成します');
-    addLog('info', '各URLを開いてGeoJSON ZIPを手動でダウンロードしてください');
-    cities.forEach(([code, name], i) => {
-      const url = buildFallbackUrl(code);
-      fetchedUrls.push({ code, name, url, status: 'ok' });
-      updateProgress(i + 1, total, name);
-    });
-    addLog('ok', `${total}件のURLを生成しました`);
-    renderResults();
+  if (apiMode !== 'ckan') {
+    addLog('err', '⚠ CKAN APIに接続できていません。ページを再読み込みしてください。');
+    document.getElementById('fetchSpinner').style.display = 'none';
+    document.getElementById('fetchStatusText').textContent = 'API未接続';
     btn.disabled = false;
-    document.getElementById('fetchBtnIcon').textContent = '🔍';
-    document.getElementById('fetchBtnText').textContent = 'ダウンロードURLを取得';
+    document.getElementById('fetchBtnIcon').textContent = '⬇️';
+    document.getElementById('fetchBtnText').textContent = 'ダウンロード';
     return;
   }
 
-  // CKANモード：API経由でGeoJSON URLを取得
+  // STEP 1: CKAN APIでURL取得
   for (let i = 0; i < cities.length; i++) {
     const [code, name] = cities[i];
     updateProgress(i, total, name);
@@ -1387,7 +1352,7 @@ async function startFetch() {
       const url = await getGeoJsonUrl(code, name);
       fetchedUrls.push({ code, name, url, status: url ? 'ok' : 'notfound' });
       if (url) {
-        addLog('ok', `✓ ${name} — ${url.split('/').pop()}`);
+        addLog('ok', `✓ ${name}`);
       } else {
         addLog('warn', `△ ${name} — GeoJSON未公開`);
       }
@@ -1399,12 +1364,69 @@ async function startFetch() {
     if (i < cities.length - 1) await sleep(120);
   }
 
-  updateProgress(total, total, '完了');
+  updateProgress(total, total, '取得完了');
+  document.getElementById('fetchSpinner').style.display = 'none';
+  const okCount = fetchedUrls.filter(r => r.status === 'ok').length;
+  document.getElementById('fetchStatusText').textContent = `✓ URL取得完了（${okCount} / ${total}件）`;
+
+  if (okCount === 0) {
+    addLog('warn', 'ダウンロード可能なファイルがありません');
+    btn.disabled = false;
+    document.getElementById('fetchBtnIcon').textContent = '⬇️';
+    document.getElementById('fetchBtnText').textContent = 'ダウンロード';
+    return;
+  }
+
+  // STEP 2: 確認ダイアログ
+  const confirmed = confirm(`${okCount}件のGeoJSONをダウンロードします。よろしいですか？`);
+  if (!confirmed) {
+    btn.disabled = false;
+    document.getElementById('fetchBtnIcon').textContent = '⬇️';
+    document.getElementById('fetchBtnText').textContent = 'ダウンロード';
+    return;
+  }
+
+  // STEP 3: GeoJSONファイルを順番にfetch→保存
+  document.getElementById('fetchBtnText').textContent = 'DL中…';
+  document.getElementById('fetchSpinner').style.display = '';
+  document.getElementById('fetchStatusText').textContent = 'GeoJSONをダウンロード中…';
+  document.getElementById('logArea').innerHTML = '';
+
+  const okItems = fetchedUrls.filter(r => r.status === 'ok');
+  const dlTotal = okItems.length;
+
+  for (let i = 0; i < okItems.length; i++) {
+    const { name, url } = okItems[i];
+    updateProgress(i, dlTotal, name);
+
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = url.split('/').pop().split('?')[0];
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      addLog('ok', `✓ ${name} — ${a.download}`);
+    } catch(e) {
+      addLog('err', `✗ ${name} — ${e.message}`);
+    }
+
+    await sleep(500);
+  }
+
+  updateProgress(dlTotal, dlTotal, 'ダウンロード完了');
+  document.getElementById('fetchSpinner').style.display = 'none';
+  document.getElementById('fetchStatusText').textContent = `✓ ダウンロード完了（${dlTotal}件）`;
+  addLog('ok', `${dlTotal}件のダウンロードが完了しました`);
+
   renderResults();
 
   btn.disabled = false;
-  document.getElementById('fetchBtnIcon').textContent = '🔍';
-  document.getElementById('fetchBtnText').textContent = 'ダウンロードURLを取得';
+  document.getElementById('fetchBtnIcon').textContent = '⬇️';
+  document.getElementById('fetchBtnText').textContent = 'ダウンロード';
 }
 
 async function getGeoJsonUrl(code, name) {
@@ -1448,17 +1470,15 @@ function buildFallbackUrl(code) {
 // RENDER RESULTS
 // ─────────────────────────────────────────────
 function renderResults() {
-  const okUrls = fetchedUrls.filter(r => r.url && r.status === 'ok');
-
-  // URL table
   const tbody = document.getElementById('urlTableBody');
   tbody.innerHTML = '';
   fetchedUrls.forEach(({ code, name, url, status }) => {
     const icon = status === 'ok' ? '✅' : status === 'notfound' ? '⚠️' : '❌';
+    const filename = url ? url.split('/').pop().split('?')[0] : '(未公開)';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="td-muni">${name}<br><span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${code}</span></td>
-      <td class="td-url">${url || '(未公開)'}</td>
+      <td class="td-url">${filename}</td>
       <td class="td-status">${icon}</td>
     `;
     tbody.appendChild(tr);
@@ -1466,78 +1486,11 @@ function renderResults() {
 
   document.getElementById('urlTableWrap').style.display = 'block';
   document.getElementById('emptyState').style.display = 'none';
-
-  // curl / wget
-  const isFallback = apiMode === 'fallback';
-  if (isFallback) {
-    // fallbackモードはデータセットページURLのみ
-    const lines = fetchedUrls.map(r => r.url).filter(Boolean);
-    document.getElementById('curlCode').textContent =
-      `# CORS制限のため直接ダウンロードURLが取得できませんでした\n` +
-      `# 下記のデータセットページから手動でGeoJSON ZIPをダウンロードしてください\n\n` +
-      lines.join('\n');
-    document.getElementById('psCode').textContent =
-      `# CORS制限のため直接ダウンロードURLが取得できませんでした\n` +
-      `# 下記のデータセットページから手動でGeoJSON ZIPをダウンロードしてください\n\n` +
-      lines.join('\n');
-  } else {
-    const directUrls = okUrls.map(r => r.url);
-    document.getElementById('curlCode').textContent =
-      `# url_list.txtを使った一括ダウンロード\n` +
-      `# まず url_list.txt をダウンロードしてから以下を実行\n\n` +
-      `mkdir -p geojson_download\ncd geojson_download\n\n` +
-      `# curl (Linux/Mac)\nxargs -n1 curl -LO < ../url_list.txt\n\n` +
-      `# wget\nwget -i ../url_list.txt`;
-
-    document.getElementById('psCode').textContent =
-      `# PowerShell — 直接ダウンロード\n` +
-      `$urls = @(\n` +
-      directUrls.map(u => `  "${u}"`).join(',\n') + '\n)\n\n' +
-      `$dir = ".\\geojson_download"\nNew-Item -ItemType Directory -Force -Path $dir | Out-Null\n\n` +
-      `foreach ($url in $urls) {\n` +
-      `  $file = Join-Path $dir ([System.IO.Path]::GetFileName($url))\n` +
-      `  Write-Host "Downloading: $([System.IO.Path]::GetFileName($url))"\n` +
-      `  Invoke-WebRequest -Uri $url -OutFile $file\n` +
-      `}`;
-  }
-
-  // show/hide code blocks
-  const hasDirect = !isFallback && okUrls.length > 0;
-  document.getElementById('curlBlock').style.display = 'block';
-  document.getElementById('psBlock').style.display = 'block';
-  document.getElementById('curlEmpty').style.display = 'none';
-  document.getElementById('psEmpty').style.display = 'none';
-
-  addLog('ok', `完了: ${okUrls.length}件のURL生成完了`);
 }
 
 // ─────────────────────────────────────────────
-// DOWNLOAD / COPY
+// COPY / TOAST
 // ─────────────────────────────────────────────
-function downloadUrlList() {
-  const okUrls = fetchedUrls.filter(r => r.url && r.status === 'ok').map(r => r.url);
-  if (okUrls.length === 0) { alert('ダウンロード可能なURLがありません'); return; }
-  const blob = new Blob([okUrls.join('\n') + '\n'], { type: 'text/plain' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'url_list.txt';
-  a.click();
-}
-
-function copyAllUrls() {
-  const urls = fetchedUrls.map(r => r.url || `# ${r.name} (未公開)`).join('\n');
-  navigator.clipboard.writeText(urls).then(() => showToast('URLをコピーしました'));
-}
-
-function copyCurl() {
-  navigator.clipboard.writeText(document.getElementById('curlCode').textContent)
-    .then(() => showToast('コマンドをコピーしました'));
-}
-
-function copyPs() {
-  navigator.clipboard.writeText(document.getElementById('psCode').textContent)
-    .then(() => showToast('スクリプトをコピーしました'));
-}
 
 function showToast(msg) {
   const t = document.createElement('div');
@@ -1549,16 +1502,6 @@ function showToast(msg) {
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.remove(), 500); }, 1800);
-}
-
-// ─────────────────────────────────────────────
-// TAB
-// ─────────────────────────────────────────────
-function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.getElementById(`tab-${name}`).classList.add('active');
-  document.getElementById(`tabContent-${name}`).classList.add('active');
 }
 
 // ─────────────────────────────────────────────
